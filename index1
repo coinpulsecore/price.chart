@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Market Chart</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      background-color: #1e1e1e;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    #chart-container {
+      width: 90%;
+      max-width: 800px;
+      margin-top: 2rem;
+    }
+    .tabs {
+      display: flex;
+      justify-content: space-around;
+      width: 100%;
+      margin-top: 2rem;
+      background-color: #ff7300;
+    }
+    .tab {
+      flex: 1;
+      padding: 1rem;
+      text-align: center;
+      cursor: pointer;
+      background-color: #ff7300;
+      color: #fff;
+      font-weight: bold;
+    }
+    .tab:hover {
+      background-color: #ffa94d;
+    }
+    canvas {
+      background-color: #2a2a2a;
+      border-radius: 8px;
+      padding: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Crypto Price Chart (Last 90 Days)</h1>
+  <div id="chart-container">
+    <canvas id="priceChart"></canvas>
+  </div>
+  <div class="tabs">
+    <div class="tab" onclick="loadChart('bitcoin')">BTC</div>
+    <div class="tab" onclick="loadChart('ethereum')">ETH</div>
+    <div class="tab" onclick="loadChart('binancecoin')">BNB</div>
+    <div class="tab" onclick="loadChart('ripple')">XRP</div>
+    <div class="tab" onclick="loadChart('solana')">SOL</div>
+  </div>
+
+  <script>
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    let chart;
+
+    async function loadChart(coinId) {
+      const response = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=90`
+      );
+      const data = await response.json();
+      const labels = data.prices.map(price => new Date(price[0]).toLocaleDateString());
+      const prices = data.prices.map(price => price[1]);
+      const volumes = data.total_volumes.map(volume => volume[1]);
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: `${coinId.toUpperCase()} Price (USD)`,
+              data: prices,
+              borderColor: '#ffa94d',
+              backgroundColor: 'rgba(255,165,0,0.1)',
+              borderWidth: 2,
+              fill: true,
+              tension: 0.2
+            },
+            {
+              label: `${coinId.toUpperCase()} Volume (USD)`,
+              data: volumes,
+              borderColor: '#ffd580',
+              backgroundColor: 'rgba(255,213,128,0.1)',
+              borderWidth: 1,
+              fill: true,
+              tension: 0.2,
+              yAxisID: 'volume'
+            }
+          ]
+        },
+        options: {
+          scales: {
+            y: {
+              beginAtZero: false,
+              title: {
+                display: true,
+                text: 'Price (USD)'
+              }
+            },
+            volume: {
+              type: 'linear',
+              position: 'right',
+              beginAtZero: false,
+              title: {
+                display: true,
+                text: 'Volume (USD)'
+              },
+              grid: {
+                drawOnChartArea: false
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: {
+                color: '#fff'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // Load default chart on load
+    loadChart('bitcoin');
+  </script>
+</body>
+</html>
