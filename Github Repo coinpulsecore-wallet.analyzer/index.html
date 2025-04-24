@@ -3,111 +3,173 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Wallet Analyzer</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <title>CoinPulse - Price Explorer</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
       margin: 0;
-      font-family: 'Inter', sans-serif;
-      background-color: #0f0f0f;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #1a1a1a;
       color: #fff;
+    }
+    #chartContainer {
+      width: 100vw;
+      height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 2rem;
+      justify-content: center;
+      padding: 1rem;
+      box-sizing: border-box;
     }
-    h1 {
-      color: #ff9900;
+    h2 {
+      color: #ffa94d;
+      margin-bottom: 0.5rem;
+      font-size: 2rem;
     }
-    input {
-      padding: 0.7rem 1rem;
-      border-radius: 6px;
-      border: none;
-      font-size: 1rem;
+    #coinSearch {
       width: 300px;
-    }
-    button {
-      margin-top: 1rem;
-      padding: 0.6rem 1.2rem;
+      padding: 0.6rem 1rem;
       font-size: 1rem;
       border-radius: 6px;
       border: none;
-      background-color: #ff9900;
-      color: #000;
-      cursor: pointer;
+      margin: 1rem 0;
     }
-    .results {
+    #range-buttons button {
+      margin: 0.25rem;
+      padding: 0.5rem 1rem;
+      background: #ffa94d;
+      border: none;
+      color: black;
+      font-weight: bold;
+      cursor: pointer;
+      border-radius: 6px;
+    }
+    #range-buttons button:hover {
+      background-color: #ffb955;
+    }
+    canvas {
       margin-top: 2rem;
       width: 100%;
-      max-width: 700px;
-      background-color: #1b1b1b;
-      padding: 1.5rem;
-      border-radius: 10px;
+      max-width: 1200px;
+      height: 75vh;
+      background-color: #2e2e2e;
+      border-radius: 12px;
+      padding: 1rem;
     }
-    .result-item {
-      margin: 1rem 0;
+    .autocomplete-item {
+      padding: 0.4rem;
+      background-color: #fff;
+      color: #000;
+      cursor: pointer;
+      border-bottom: 1px solid #ccc;
+    }
+    .autocomplete-item:hover {
+      background-color: #eee;
     }
   </style>
 </head>
 <body>
-  <h1>🔍 Wallet Analyzer</h1>
-  <p>Enter an Ethereum wallet address to analyze profitability and token behavior.</p>
-  <input type="text" id="walletInput" placeholder="0x..." />
-  <button onclick="analyzeWallet()">Analyze</button>
-  <div class="results" id="results" style="display: none;">
-    <div class="result-item" id="txCount"></div>
-    <div class="result-item" id="totalReceived"></div>
-    <div class="result-item" id="totalSent"></div>
-    <div class="result-item" id="balance"></div>
+  <div id="chartContainer">
+    <h2>Explore Crypto Price Trends</h2>
+    <input type="text" id="coinSearch" placeholder="Search token (top 200)..." />
+    <div id="range-buttons">
+      <button onclick="loadChart('1')">1D</button>
+      <button onclick="loadChart('7')">7D</button>
+      <button onclick="loadChart('30')">1M</button>
+      <button onclick="loadChart('90')">3M</button>
+      <button onclick="loadChart('180')">6M</button>
+      <button onclick="loadChart('365')">1Y</button>
+      <button onclick="loadChart('1095')">3Y</button>
+    </div>
+    <canvas id="priceChart"></canvas>
   </div>
 
   <script>
-    async function analyzeWallet() {
-      const address = document.getElementById('walletInput').value;
-      if (!address.startsWith('0x') || address.length !== 42) {
-        alert('Please enter a valid Ethereum address.');
-        return;
-      }
+    const searchInput = document.getElementById('coinSearch');
+    const ctx = document.getElementById('priceChart').getContext('2d');
+    let coinList = [], currentCoin = 'bitcoin', chart;
 
-      const results = document.getElementById('results');
-      results.style.display = 'none';
-
-      const API_KEY = 'CXTB4IUT31N836G93ZI3YQBEWBQEGGH5QS'; // Example Etherscan key
-      const base = `https://api.etherscan.io/api?module=account&action=`;
-
-      try {
-        // 1. Get transaction count
-        const txRes = await fetch(`${base}txlist&address=${address}&sort=asc&apikey=${API_KEY}`);
-        const txData = await txRes.json();
-
-        // 2. Get balance
-        const balRes = await fetch(`${base}balance&address=${address}&tag=latest&apikey=${API_KEY}`);
-        const balData = await balRes.json();
-
-        // 3. Get internal transactions to determine received ETH
-        let totalReceived = 0, totalSent = 0;
-        if (txData.result) {
-          txData.result.forEach(tx => {
-            if (tx.to.toLowerCase() === address.toLowerCase()) {
-              totalReceived += parseFloat(tx.value) / 1e18;
-            } else {
-              totalSent += parseFloat(tx.value) / 1e18;
-            }
-          });
-        }
-
-        // Display Results
-        document.getElementById('txCount').innerText = `📄 Transactions: ${txData.result.length}`;
-        document.getElementById('totalReceived').innerText = `📥 Total ETH Received: ${totalReceived.toFixed(4)} ETH`;
-        document.getElementById('totalSent').innerText = `📤 Total ETH Sent: ${totalSent.toFixed(4)} ETH`;
-        document.getElementById('balance').innerText = `💰 Current ETH Balance: ${(parseFloat(balData.result) / 1e18).toFixed(4)} ETH`;
-
-        results.style.display = 'block';
-      } catch (error) {
-        alert('Error fetching data. Please try again later.');
-        console.error(error);
-      }
+    async function getCoins() {
+      const res = await fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=200&page=1');
+      const data = await res.json();
+      coinList = data.map(coin => ({ id: coin.id, name: coin.name, symbol: coin.symbol.toUpperCase() }));
     }
+
+    searchInput.addEventListener('input', () => {
+      const value = searchInput.value.toLowerCase();
+      const matches = coinList.filter(c => c.name.toLowerCase().includes(value) || c.symbol.toLowerCase().includes(value));
+      const list = document.createElement('div');
+      list.style.position = 'absolute';
+      list.style.width = '300px';
+      list.style.backgroundColor = '#fff';
+      list.style.zIndex = 10;
+      searchInput.insertAdjacentElement('afterend', list);
+      list.innerHTML = '';
+      matches.slice(0, 8).forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'autocomplete-item';
+        item.textContent = `${c.name} (${c.symbol})`;
+        item.onclick = () => {
+          searchInput.value = `${c.name} (${c.symbol})`;
+          currentCoin = c.id;
+          list.remove();
+          loadChart('90');
+        };
+        list.appendChild(item);
+      });
+    });
+
+    async function loadChart(days) {
+      const res = await fetch(`https://api.coingecko.com/api/v3/coins/${currentCoin}/market_chart?vs_currency=usd&days=${days}`);
+      const data = await res.json();
+      const labels = data.prices.map(p => new Date(p[0]).toLocaleDateString());
+      const prices = data.prices.map(p => p[1]);
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: `${searchInput.value || 'Bitcoin'} Price (USD)`,
+            data: prices,
+            borderColor: '#ffa94d',
+            backgroundColor: 'rgba(255,165,77,0.1)',
+            borderWidth: 3,
+            fill: true,
+            pointRadius: 0,
+            tension: 0.3
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: {
+            x: { ticks: { color: '#aaa' } },
+            y: {
+              ticks: { color: '#fff', font: { size: 14 } },
+              title: {
+                display: true,
+                text: 'Price (USD)',
+                color: '#ffa94d'
+              }
+            }
+          },
+          plugins: {
+            legend: {
+              labels: { color: '#ffa94d', font: { size: 16 } }
+            },
+            tooltip: {
+              mode: 'index',
+              intersect: false
+            }
+          }
+        }
+      });
+    }
+
+    getCoins().then(() => loadChart('90'));
   </script>
 </body>
 </html>
