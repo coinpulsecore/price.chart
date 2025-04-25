@@ -2,42 +2,115 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>CoinPulse BTC Chart</title>
 
-  <!-- 1) Chart.js core -->
+  <!-- Chart.js core -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <!-- 2a) Luxon (date library) -->
+  <!-- Luxon + adapter for time scale -->
   <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
-  <!-- 2b) Chart.js–Luxon adapter -->
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1/dist/chartjs-adapter-luxon.min.js"></script>
 
   <style>
-    body { margin:0; background:#1e1e1e; color:#fff; font-family:sans-serif; }
-    #controls {  
-      display:flex; justify-content:center; align-items:center;
-      gap:8px; padding:10px; background:#2a2a2a;
+    :root {
+      --orange: #FFA500;
+      --orange-light: rgba(255,165,0,0.2);
+      --red: #E63946;
+      --white: #FFFFFF;
+      --gray: #F5F5F5;
+      --text: #333333;
     }
-    #controls input {
-      width:200px; padding:6px; border:none;
-      border-radius:4px; background:#333; color:#fff;
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: var(--white);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    #controls {
+      padding: 10px 20px;
+      background: var(--gray);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      position: relative;
+    }
+    #coinSearch {
+      flex: 1 1 200px;
+      padding: 8px 12px;
+      border: 1px solid #CCC;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+    #autocomplete-list {
+      position: absolute;
+      top: 42px;            /* just below the search input */
+      left: 20px;
+      right: 20px;
+      background: var(--white);
+      border: 1px solid #CCC;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    .autocomplete-item {
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .autocomplete-item:hover {
+      background: #EEE;
+    }
+    #controls button {
+      padding: 8px 14px;
+      border: none;
+      background: var(--white);
+      cursor: pointer;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: background .2s;
+    }
+    #controls button.active {
+      background: var(--orange);
+      color: #FFF;
+    }
+    #controls button:hover {
+      background: var(--orange-light);
     }
     #chartContainer {
-      width:100vw; height:calc(100vh - 52px); /* adjust for controls */
+      flex: 1;
+      position: relative;
+      padding: 20px;
+      background: var(--white);
     }
-    canvas { width:100% !important; height:100% !important; }
+    canvas {
+      background: var(--white) !important;
+      border: 1px solid #DDD;
+      border-radius: 8px;
+      width: 100% !important;
+      height: 100% !important;
+    }
+    @media (max-width: 600px) {
+      #controls { justify-content: center; }
+      #controls button { flex: 1 1 100px; }
+    }
   </style>
 </head>
-<body>
 
+<body>
   <div id="controls">
-    <input type="text" id="coinSearch" placeholder="Search top 100 coins…">
-    <button data-days="1">1D</button>
-    <button data-days="7">7D</button>
-    <button data-days="30" class="active">30D</button>
-    <button data-days="90">3M</button>
-    <button data-days="180">6M</button>
-    <button data-days="365">1Y</button>
+    <input id="coinSearch" placeholder="Search top 100 coins (e.g. ETH)" autocomplete="off"/>
+    <div id="autocomplete-list"></div>
+
+    <button class="range-btn" data-days="1">1D</button>
+    <button class="range-btn" data-days="7">7D</button>
+    <button class="range-btn active" data-days="30">1M</button>
+    <button class="range-btn" data-days="90">3M</button>
+    <button class="range-btn" data-days="180">6M</button>
+    <button class="range-btn" data-days="365">1Y</button>
+    <button class="range-btn" data-days="1095">3Y</button>
     <button id="volToggle">Show Volume</button>
   </div>
 
@@ -46,92 +119,168 @@
   </div>
 
   <script>
-  // ————————————————————————————————————————————  
-  // 1) Setup & Globals
-  const ctx      = document.getElementById('priceChart').getContext('2d');
-  const search   = document.getElementById('coinSearch');
-  const volBtn   = document.getElementById('volToggle');
-  let chart, coins=[], current='bitcoin', activeDays=30;
+    // — YOUR CMC API KEY:
+    const CMC_KEY = '7925ae69-0ced-42f2-85c1-cad1d7164a58';
 
-  // 2) Fetch top 100 coins for search
-  fetch('https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100')
-    .then(r=>r.json())
-    .then(data=> coins = data.map(c=>({id:c.id, name:c.name, sym:c.symbol})));
+    const ctx        = document.getElementById('priceChart').getContext('2d');
+    const searchEl   = document.getElementById('coinSearch');
+    const listEl     = document.getElementById('autocomplete-list');
+    const volBtn     = document.getElementById('volToggle');
+    let coins        = [],
+        current      = 'BTC',
+        chart,
+        activeDays   = 30;
 
-  // 3) Autocomplete simple
-  search.addEventListener('input',()=>{
-    const val = search.value.toLowerCase();
-    const match = coins.find(c=>c.name.toLowerCase().includes(val) || c.sym.includes(val));
-    if(match) {
-      current = match.id;
-      loadChart(activeDays);
-    }
-  });
+    // 1) Load top 100 coins for autocomplete
+    fetch('https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest?limit=100', {
+      headers: { 'X-CMC_PRO_API_KEY': CMC_KEY }
+    })
+    .then(r => r.json())
+    .then(json => {
+      coins = json.data.map(c => ({
+        symbol: c.symbol,
+        name:   c.name
+      }));
+    });
 
-  // 4) Range buttons
-  document.querySelectorAll('#controls button[data-days]')
-    .forEach(btn=>btn.addEventListener('click',()=>{
-      activeDays = btn.dataset.days;
-      document.querySelectorAll('#controls button').forEach(b=>b.classList.remove('active'));
-      btn.classList.add('active');
-      loadChart(activeDays);
-    }));
-
-  // 5) Volume toggle
-  volBtn.addEventListener('click',()=>{
-    const vis = chart.isDatasetVisible(1);
-    chart.setDatasetVisibility(1, !vis);
-    chart.options.scales.y1.display = !vis;
-    volBtn.textContent = vis ? 'Show Volume':'Hide Volume';
-    chart.update();
-  });
-
-  // 6) Fetch & transform data from CoinGecko
-  async function getData(days) {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${current}/market_chart?vs_currency=usd&days=${days}`);
-    const js  = await res.json();
-    return {
-      prices: js.prices.map(p=>({x:p[0], y:p[1]})),
-      volumes: js.total_volumes.map(v=>({x:v[0], y:v[1]}))
-    };
-  }
-
-  // 7) Initialize or update Chart.js
-  async function loadChart(days) {
-    const {prices, volumes} = await getData(days);
-    if(chart) {
-      chart.data.datasets[0].data = prices;
-      chart.data.datasets[1].data = volumes;
-      chart.update();
-    } else {
-      chart = new Chart(ctx, {
-        data: {
-          datasets: [
-            { type:'line',  label:'Price (USD)', data:prices,
-              borderColor:'#FFA500', backgroundColor:'rgba(255,165,0,0.2)',
-              pointRadius:0, tension:0.2, yAxisID:'y' },
-            { type:'bar', label:'Volume', data:volumes, hidden:true,
-              backgroundColor:'rgba(255,165,0,0.3)', yAxisID:'y1' }
-          ]
-        },
-        options: {
-          responsive:true, maintainAspectRatio:false,
-          scales: {
-            x: { type:'time', time:{unit:'day'}, ticks:{color:'#ccc'} },
-            y: { position:'left', ticks:{color:'#fff'} },
-            y1:{ position:'right', display:false, ticks:{color:'#fff'} }
-          },
-          plugins:{
-            tooltip:{mode:'index', intersect:false},
-            legend:{display:false}
-          }
-        }
+    // 2) Autocomplete
+    searchEl.addEventListener('input', () => {
+      const v = searchEl.value.toLowerCase();
+      listEl.innerHTML = '';
+      if (!v) return;
+      coins.filter(c =>
+        c.name.toLowerCase().includes(v) ||
+        c.symbol.toLowerCase().includes(v)
+      ).slice(0,8).forEach(c => {
+        const d = document.createElement('div');
+        d.className = 'autocomplete-item';
+        d.textContent = `${c.name} (${c.symbol})`;
+        d.onclick = () => {
+          current = c.symbol;
+          searchEl.value = `${c.name} (${c.symbol})`;
+          listEl.innerHTML = '';
+          loadChart(activeDays);
+        };
+        listEl.appendChild(d);
       });
-    }
-  }
+    });
 
-  // 8) Kick it off
-  loadChart(activeDays);
+    // 3) Range buttons
+    document.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        activeDays = btn.dataset.days;
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        loadChart(activeDays);
+      });
+    });
+
+    // 4) Volume toggle
+    volBtn.addEventListener('click', () => {
+      const vis = chart.isDatasetVisible(1);
+      chart.setDatasetVisibility(1, !vis);
+      chart.options.scales.y1.display = !vis;
+      volBtn.textContent = vis ? 'Show Volume' : 'Hide Volume';
+      volBtn.classList.toggle('active');
+      chart.update();
+    });
+
+    // 5) Fetch historical data from CMC
+    async function fetchData(days) {
+      const now   = Math.floor(Date.now()/1000);
+      const start = now - days*24*3600;
+      const interval = days > 90 ? 'daily' : 'hourly';
+      const url = `https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/historical?symbol=${current}&time_start=${start}&time_end=${now}&interval=${interval}`;
+      const res = await fetch(url, {
+        headers: { 'X-CMC_PRO_API_KEY': CMC_KEY }
+      });
+      const js = await res.json();
+      const prices  = js.data.quotes.map(pt => ({
+        x: Date.parse(pt.timestamp),
+        y: pt.quote.USD.price
+      }));
+      const volumes = js.data.quotes.map(pt => ({
+        x: Date.parse(pt.timestamp),
+        y: pt.quote.USD.volume_24h
+      }));
+      return { prices, volumes };
+    }
+
+    // 6) Initialize or update Chart.js
+    async function loadChart(days) {
+      const { prices, volumes } = await fetchData(days);
+
+      // Decide color: up (orange) or down (red)
+      const first = prices[0]?.y, last = prices.at(-1)?.y;
+      const up = last >= first;
+      const lineColor = up ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
+                           : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+
+      if (chart) {
+        chart.data.datasets[0].data = prices;
+        chart.data.datasets[0].borderColor = lineColor;
+        chart.data.datasets[1].data = volumes;
+        chart.update();
+      } else {
+        chart = new Chart(ctx, {
+          data: {
+            datasets: [
+              {
+                type: 'line',
+                label: 'Price (USD)',
+                data: prices,
+                borderColor: lineColor,
+                backgroundColor: 'var(--orange-light)',
+                fill: false,
+                tension: 0.2,
+                pointRadius: 0,
+                yAxisID: 'y'
+              },
+              {
+                type: 'bar',
+                label: 'Volume (24h)',
+                data: volumes,
+                backgroundColor: 'var(--orange-light)',
+                hidden: true,
+                yAxisID: 'y1'
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'time',
+                time: { unit: days <= 1 ? 'hour' : 'day' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y: {
+                position: 'left',
+                title: { display: true, text: 'Price (USD)', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y1: {
+                position: 'right',
+                display: false,
+                title: { display: true, text: 'Volume', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { drawOnChartArea: false }
+              }
+            },
+            plugins: {
+              tooltip: { mode: 'index', intersect: false },
+              legend: { display: false }
+            }
+          }
+        });
+      }
+    }
+
+    // 7) Initial chart load (30 days)
+    loadChart(activeDays);
   </script>
 </body>
 </html>
