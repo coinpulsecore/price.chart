@@ -1,31 +1,42 @@
-import fetch from 'node-fetch';
+// netlify/functions/proxy-cmc.js
 
-export async function handler(event) {
-  const { path, symbol, limit, time_start, time_end, interval } = event.queryStringParameters || {};
+const fetch = require('node-fetch');
 
-  const base = 'https://pro-api.coinmarketcap.com/v1';
-  const urlPath = `${base}${path}`;
-  const params = new URLSearchParams();
+exports.handler = async function(event, context) {
+  try {
+    const params = event.queryStringParameters || {};
+    const path   = params.path;
+    if (!path) {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: 'Missing "path" parameter' }),
+      };
+    }
 
-  if (limit)      params.set('limit', limit);
-  if (symbol)     params.set('symbol', symbol);
-  if (time_start) params.set('time_start', time_start);
-  if (time_end)   params.set('time_end', time_end);
-  if (interval)   params.set('interval', interval);
+    // Build the CMC URL
+    const base = 'https://pro-api.coinmarketcap.com/v1';
+    const url  = `${base}${path}?${new URLSearchParams(params).toString()}`;
 
-  const url = `${urlPath}?${params.toString()}`;
+    // Call CMC
+    const resp = await fetch(url, {
+      headers: { 'X-CMC_PRO_API_KEY': process.env.CMC_KEY }
+    });
 
-  const response = await fetch(url, {
-    headers: { 'X-CMC_PRO_API_KEY': process.env.CMC_KEY }
-  });
-  const body = await response.text();
-
-  return {
-    statusCode: response.status,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Content-Type': 'application/json'
-    },
-    body
-  };
-}
+    const text = await resp.text();
+    return {
+      statusCode: resp.status,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
+      body: text
+    };
+  } catch (err) {
+    console.error('proxy-cmc error:', err);
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: err.message })
+    };
+  }
+};
