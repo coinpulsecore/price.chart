@@ -1,5 +1,4 @@
 // netlify/functions/proxy-cmc.js
-const fetch = require('node-fetch');
 
 exports.handler = async function(event) {
   try {
@@ -13,19 +12,20 @@ exports.handler = async function(event) {
       };
     }
 
-    // Pull out `path`, leave the rest as query params
+    // Extract path, build query string from the rest
     const { path: _, ...rest } = params;
     const qs = new URLSearchParams(rest).toString();
     const url = `https://pro-api.coinmarketcap.com/v1${path}?${qs}`;
 
     console.log('proxy-cmc fetching URL:', url);
 
+    // Use Node18's built-in fetch
     const resp = await fetch(url, {
       headers: { 'X-CMC_PRO_API_KEY': process.env.CMC_KEY }
     });
 
     const text = await resp.text();
-    console.log('proxy-cmc status:', resp.status, 'body length:', text.length);
+    console.log('proxy-cmc status:', resp.status);
 
     return {
       statusCode: resp.status,
@@ -35,6 +35,7 @@ exports.handler = async function(event) {
       },
       body: text
     };
+
   } catch (err) {
     console.error('proxy-cmc error:', err);
     return {

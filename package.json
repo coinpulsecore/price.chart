@@ -16,8 +16,5 @@
     "url": "https://github.com/coinpulsecore/price.chart/issues"
   },
   "homepage": "https://github.com/coinpulsecore/price.chart#readme",
-  "description": "",
-  "dependencies": {
-    "node-fetch": "^3.3.2"
-  }
+  "description": ""
 }
