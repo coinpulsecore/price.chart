@@ -119,50 +119,64 @@
   </div>
 
   <script>
-    // — YOUR CMC API KEY:
     const CMC_KEY = '7925ae69-0ced-42f2-85c1-cad1d7164a58';
-
-    const ctx        = document.getElementById('priceChart').getContext('2d');
-    const searchEl   = document.getElementById('coinSearch');
-    const listEl     = document.getElementById('autocomplete-list');
-    const volBtn     = document.getElementById('volToggle');
-    let coins        = [],
-        current      = 'BTC',
+    const ctx      = document.getElementById('priceChart').getContext('2d');
+    const searchEl = document.getElementById('coinSearch');
+    const listEl   = document.getElementById('autocomplete-list');
+    const volBtn   = document.getElementById('volToggle');
+    let coins      = [],             // { symbol, name, geckoId }
+        current    = 'bitcoin',      // default gecko ID
         chart,
-        activeDays   = 30;
-
-    // 1) Load top 100 coins for autocomplete (via Netlify proxy)
-    fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
-      .then(r => r.json())
-      .then(json => {
-        coins = json.data.map(c => ({
-          symbol: c.symbol,
-          name:   c.name
-        }));
-      });
-
-    // 2) Autocomplete
+        activeDays = 30;
+  
+    // 1) Load top 100 coins from CMC for search, but also fetch CoinGecko IDs
+    //    We'll get a list of gecko IDs separately.
+    Promise.all([
+      fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
+        .then(r => r.json())
+        .then(json => json.data.map(c => ({ symbol: c.symbol, name: c.name }))),
+      fetch('https://api.coingecko.com/api/v3/coins/list')
+        .then(r => r.json())
+    ]).then(([cmcList, geckoList])=>{
+      // Build a map for quick lookup: symbol→geckoId
+      const geckoMap = Object.fromEntries(
+        geckoList.map(c => [c.symbol.toUpperCase(), c.id])
+      );
+  
+      // Merge CMC list with geckoId (if available)
+      coins = cmcList.map(c => ({
+        symbol: c.symbol,
+        name:   c.name,
+        geckoId: geckoMap[c.symbol] || null
+      })).filter(c => c.geckoId); // drop if no gecko ID
+    });
+  
+    // 2) Autocomplete (match from start of symbol or name)
     searchEl.addEventListener('input', () => {
-      const v = searchEl.value.toLowerCase();
+      const v = searchEl.value.trim().toLowerCase();
       listEl.innerHTML = '';
       if (!v) return;
-      coins.filter(c =>
-        c.name.toLowerCase().includes(v) ||
-        c.symbol.toLowerCase().includes(v)
-      ).slice(0,8).forEach(c => {
-        const d = document.createElement('div');
-        d.className = 'autocomplete-item';
-        d.textContent = `${c.name} (${c.symbol})`;
-        d.onclick = () => {
-          current = c.symbol;
-          searchEl.value = `${c.name} (${c.symbol})`;
-          listEl.innerHTML = '';
-          loadChart(activeDays);
-        };
-        listEl.appendChild(d);
-      });
+  
+      coins
+        .filter(c =>
+          c.symbol.toLowerCase().startsWith(v) ||
+          c.name.toLowerCase().startsWith(v)
+        )
+        .slice(0,8)
+        .forEach(c => {
+          const d = document.createElement('div');
+          d.className = 'autocomplete-item';
+          d.textContent = `${c.name} (${c.symbol})`;
+          d.onclick = () => {
+            current = c.geckoId;               // switch to gecko ID
+            searchEl.value = `${c.name} (${c.symbol})`;
+            listEl.innerHTML = '';
+            loadChart(activeDays);
+          };
+          listEl.appendChild(d);
+        });
     });
-
+  
     // 3) Range buttons
     document.querySelectorAll('.range-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -172,7 +186,7 @@
         loadChart(activeDays);
       });
     });
-
+  
     // 4) Volume toggle
     volBtn.addEventListener('click', () => {
       const vis = chart.isDatasetVisible(1);
@@ -182,49 +196,37 @@
       volBtn.classList.toggle('active');
       chart.update();
     });
-
-    // 5) Fetch historical data from CMC via proxy
+  
+    // 5) Fetch historical data from CoinGecko
     async function fetchData(days) {
-      const now   = Math.floor(Date.now()/1000);
-      const start = now - days*24*3600;
-      const interval = days > 90 ? 'daily' : 'hourly';
-
-      // Proxy call (no CORS issues)
+      // e.g. https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=30
       const res = await fetch(
-        '/.netlify/functions/proxy-cmc'
-        + `?path=/cryptocurrency/quotes/historical`
-        + `&symbol=${current}`
-        + `&time_start=${start}`
-        + `&time_end=${now}`
-        + `&interval=${interval}`
+        `https://api.coingecko.com/api/v3/coins/${current}/market_chart`
+        + `?vs_currency=usd&days=${days}`
       );
-
       const js = await res.json();
-      const prices  = js.data.quotes.map(pt => ({
-        x: Date.parse(pt.timestamp),
-        y: pt.quote.USD.price
-      }));
-      const volumes = js.data.quotes.map(pt => ({
-        x: Date.parse(pt.timestamp),
-        y: pt.quote.USD.volume_24h
-      }));
-      return { prices, volumes };
+      // js.prices = [[timestamp, price], ...]
+      // js.total_volumes = [[timestamp, volume], ...]
+      return {
+        prices: js.prices.map(p => ({ x: p[0], y: p[1] })),
+        volumes: js.total_volumes.map(v => ({ x: v[0], y: v[1] }))
+      };
     }
-
+  
     // 6) Initialize or update Chart.js
     async function loadChart(days) {
       const { prices, volumes } = await fetchData(days);
-
-      // Decide color: up (orange) or down (red)
-      const first = prices[0]?.y, last = prices.at(-1)?.y;
-      const up = last >= first;
-      const lineColor = up
-        ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
-        : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
-
+  
+      // Color: up (orange) or down (red)
+      const up    = prices.at(-1).y >= prices[0].y;
+      const color = up ? getComputedStyle(document.documentElement)
+                         .getPropertyValue('--orange').trim()
+                       : getComputedStyle(document.documentElement)
+                         .getPropertyValue('--red').trim();
+  
       if (chart) {
         chart.data.datasets[0].data = prices;
-        chart.data.datasets[0].borderColor = lineColor;
+        chart.data.datasets[0].borderColor = color;
         chart.data.datasets[1].data = volumes;
         chart.update();
       } else {
@@ -235,7 +237,7 @@
                 type: 'line',
                 label: 'Price (USD)',
                 data: prices,
-                borderColor: lineColor,
+                borderColor: color,
                 backgroundColor: 'var(--orange-light)',
                 fill: false,
                 tension: 0.2,
@@ -284,9 +286,9 @@
         });
       }
     }
-
-    // 7) Initial chart load (30 days)
+  
+    // 7) Kick it off
     loadChart(activeDays);
-  </script>
+  </script>  
 </body>
 </html>
