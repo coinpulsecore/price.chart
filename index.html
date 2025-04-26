@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>CoinPulse BTC Chart</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>CoinPulse Price Chart</title>
 
-  <!-- Chart.js and Luxon -->
+  <!-- Chart.js & Luxon -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1/dist/chartjs-adapter-luxon.min.js"></script>
@@ -24,52 +24,84 @@
       font-family: Arial, sans-serif;
       background: var(--white);
       color: var(--text);
-      display: flex; flex-direction: column; min-height:100vh;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
     }
     #controls {
-      padding:10px 20px; background:var(--gray);
-      display:flex; flex-wrap:wrap; gap:10px; align-items:center;
-      position:relative;
+      background: var(--gray);
+      padding: 10px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      position: relative;
     }
     #coinSearch {
-      flex:1 1 200px; padding:8px 12px;
-      border:1px solid #CCC; border-radius:4px;
-      font-size:1rem;
+      flex: 1 1 200px;
+      padding: 8px 12px;
+      border: 1px solid #CCC;
+      border-radius: 4px;
+      font-size: 1rem;
     }
     #autocomplete-list {
-      position:absolute; top:42px; left:20px; right:20px;
-      background:var(--white); border:1px solid #CCC;
-      max-height:200px; overflow-y:auto; z-index:10;
+      position: absolute;
+      top: 42px;
+      left: 20px;
+      right: 20px;
+      background: var(--white);
+      border: 1px solid #CCC;
+      max-height: 200px;
+      overflow-y: auto;
+      z-index: 10;
     }
-    .autocomplete-item { padding:6px 12px; cursor:pointer; }
-    .autocomplete-item:hover { background:#EEE; }
+    .autocomplete-item {
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+    .autocomplete-item:hover {
+      background: #EEE;
+    }
     #controls button {
-      padding:8px 14px; border:none; background:var(--white);
-      cursor:pointer; border-radius:4px;
-      box-shadow:0 1px 3px rgba(0,0,0,0.1);
-      transition:background .2s;
+      padding: 8px 14px;
+      border: none;
+      background: var(--white);
+      cursor: pointer;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: background .2s;
     }
-    #controls button.active { background:var(--orange); color:#FFF; }
-    #controls button:hover { background:var(--orange-light); }
+    #controls button.active {
+      background: var(--orange);
+      color: #FFF;
+    }
+    #controls button:hover {
+      background: var(--orange-light);
+    }
     #chartContainer {
-      flex:1; position:relative; padding:20px;
-      background:var(--white);
+      flex: 1;
+      background: var(--white);
+      padding: 20px;
     }
     canvas {
-      background:var(--white) !important;
-      border:1px solid #DDD; border-radius:8px;
-      width:100% !important; height:100% !important;
+      background: var(--white) !important;
+      border: 1px solid #DDD;
+      border-radius: 8px;
+      width: 100% !important;
+      height: 100% !important;
     }
     @media (max-width:600px) {
-      #controls { justify-content:center; }
-      #controls button { flex:1 1 100px; }
+      #controls { justify-content: center; }
+      #controls button { flex: 1 1 100px; }
     }
   </style>
 </head>
 <body>
+
   <div id="controls">
     <input id="coinSearch" placeholder="Search top 100 coins (e.g. ETH)" autocomplete="off"/>
     <div id="autocomplete-list"></div>
+
     <button class="range-btn" data-days="1">1D</button>
     <button class="range-btn" data-days="7">7D</button>
     <button class="range-btn active" data-days="30">1M</button>
@@ -79,6 +111,7 @@
     <button class="range-btn" data-days="1095">3Y</button>
     <button id="volToggle">Show Volume</button>
   </div>
+
   <div id="chartContainer">
     <canvas id="priceChart"></canvas>
   </div>
@@ -88,23 +121,30 @@
     const searchEl = document.getElementById('coinSearch');
     const listEl   = document.getElementById('autocomplete-list');
     const volBtn   = document.getElementById('volToggle');
-    let coins      = [], current='bitcoin', chart, activeDays=30;
 
-    // 1) Fetch top 100 coins from CMC (proxy)
+    let coins      = [];           // CMC top 100
+    let geckoMap   = {};           // symbol → geckoId
+    let current    = 'bitcoin';    // default to BTC (geckoId)
+    let chart, activeDays = 30;
+
+    // 1) Fetch top 100 coins from CMC via proxy
     fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
-      .then(r=>r.json())
-      .then(json=> coins = json.data.map(c => ({
-        symbol: c.symbol, name: c.name
-      })));
+      .then(r => r.json())
+      .then(json => {
+        coins = json.data.map(c => ({
+          symbol: c.symbol,
+          name:   c.name
+        }));
+      });
 
-// 2) Fetch CoinGecko symbol→ID map directly
-fetch('https://api.coingecko.com/api/v3/coins/list')
-  .then(r=>r.json())
-  .then(list=> {
-    list.forEach(c => {
-      geckoMap[c.symbol.toUpperCase()] = c.id;
-    });
-  });
+    // 2) Fetch gecko symbol-to-ID map directly
+    fetch('https://api.coingecko.com/api/v3/coins/list')
+      .then(r => r.json())
+      .then(list => {
+        list.forEach(c => {
+          geckoMap[c.symbol.toUpperCase()] = c.id;
+        });
+      });
 
     // 3) Autocomplete (match from start)
     searchEl.addEventListener('input', () => {
@@ -115,22 +155,22 @@ fetch('https://api.coingecko.com/api/v3/coins/list')
         c.symbol.toLowerCase().startsWith(v) ||
         c.name.toLowerCase().startsWith(v)
       ).slice(0,8).forEach(c => {
-        const d = document.createElement('div');
-        d.className = 'autocomplete-item';
-        d.textContent = `${c.name} (${c.symbol})`;
-        d.onclick = () => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.textContent = `${c.name} (${c.symbol})`;
+        div.onclick = () => {
           const id = geckoMap[c.symbol];
-          if (!id) return alert('No data for '+c.symbol);
+          if (!id) return alert('No data for ' + c.symbol);
           current = id;
           searchEl.value = `${c.name} (${c.symbol})`;
           listEl.innerHTML = '';
           loadChart(activeDays);
         };
-        listEl.appendChild(d);
+        listEl.appendChild(div);
       });
     });
 
-    // 4) Range buttons
+    // 4) Range button handlers
     document.querySelectorAll('.range-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         activeDays = btn.dataset.days;
@@ -150,63 +190,91 @@ fetch('https://api.coingecko.com/api/v3/coins/list')
       chart.update();
     });
 
-    // 6) Fetch chart data via proxy-gecko
-    +async function fetchData(days) {
-+  const res = await fetch(
-+    `https://api.coingecko.com/api/v3/coins/${current}/market_chart`
-+    + `?vs_currency=usd&days=${days}`
-+  );
-+  const js  = await res.json();
+    // 6) Fetch chart data from CoinGecko
+    async function fetchData(days) {
+      const res = await fetch(
+        `https://api.coingecko.com/api/v3/coins/${current}/market_chart`
+        + `?vs_currency=usd&days=${days}`
+      );
+      const js = await res.json();
       return {
-        prices: js.prices.map(p=>({x:p[0],y:p[1]})),
-        volumes: js.total_volumes.map(v=>({x:v[0],y:v[1]}))
+        prices:  js.prices.map(p => ({x:p[0], y:p[1]})),
+        volumes: js.total_volumes.map(v => ({x:v[0], y:v[1]}))
       };
     }
 
-    // 7) Init / update Chart.js
+    // 7) Initialize/update Chart.js
     async function loadChart(days) {
-      const {prices,volumes} = await fetchData(days);
+      const {prices, volumes} = await fetchData(days);
       const up = prices.at(-1).y >= prices[0].y;
-      const color = up
+      const lineColor = up
         ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
         : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
 
       if (chart) {
         chart.data.datasets[0].data = prices;
-        chart.data.datasets[0].borderColor = color;
+        chart.data.datasets[0].borderColor = lineColor;
         chart.data.datasets[1].data = volumes;
         chart.update();
       } else {
         chart = new Chart(ctx, {
           data: {
-            datasets: [{
-              type:'line', label:'Price (USD)', data:prices,
-              borderColor:color, backgroundColor:'var(--orange-light)',
-              fill:false, tension:0.2, pointRadius:0, yAxisID:'y'
-            },{
-              type:'bar', label:'Volume (24h)', data:volumes,
-              backgroundColor:'var(--orange-light)', hidden:true, yAxisID:'y1'
-            }]
+            datasets: [
+              {
+                type: 'line',
+                label: 'Price (USD)',
+                data: prices,
+                borderColor: lineColor,
+                backgroundColor: 'var(--orange-light)',
+                fill: false,
+                tension: 0.2,
+                pointRadius: 0,
+                yAxisID: 'y'
+              },
+              {
+                type: 'bar',
+                label: 'Volume (24h)',
+                data: volumes,
+                backgroundColor: 'var(--orange-light)',
+                hidden: true,
+                yAxisID: 'y1'
+              }
+            ]
           },
           options: {
-            responsive:true, maintainAspectRatio:false,
-            scales:{
-              x:{ type:'time', time:{unit:days<=1?'hour':'day'},
-                  ticks:{color:'#333'}, grid:{color:'#EEE'} },
-              y:{ position:'left',
-                  title:{display:true,text:'Price (USD)',color:'#333'},
-                  ticks:{color:'#333'},grid:{color:'#EEE'} },
-              y1:{ position:'right', display:false,
-                   title:{display:true,text:'Volume',color:'#333'},
-                   ticks:{color:'#333'},grid:{drawOnChartArea:false} }
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'time',
+                time: { unit: days <= 1 ? 'hour' : 'day' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y: {
+                position: 'left',
+                title: { display: true, text: 'Price (USD)', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y1: {
+                position: 'right',
+                display: false,
+                title: { display: true, text: 'Volume', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { drawOnChartArea: false }
+              }
             },
-            plugins:{ tooltip:{mode:'index',intersect:false}, legend:{display:false} }
+            plugins: {
+              tooltip: { mode: 'index', intersect: false },
+              legend: { display: false }
+            }
           }
         });
       }
     }
 
-    // 8) Load default
+    // 8) Initial load
     loadChart(activeDays);
   </script>
 </body>
