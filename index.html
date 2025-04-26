@@ -47,7 +47,7 @@
     }
     #autocomplete-list {
       position: absolute;
-      top: 42px;            /* just below the search input */
+      top: 42px; /* just below the search input */
       left: 20px;
       right: 20px;
       background: var(--white);
@@ -131,16 +131,15 @@
         chart,
         activeDays   = 30;
 
-// 1) Load top 100 coins for autocomplete (via our Netlify function)
-fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100`)
-  .then(r => r.json())
-  .then(json => {
-    coins = json.data.map(c => ({
-      symbol: c.symbol,
-      name:   c.name
-    }));
-  });
-
+    // 1) Load top 100 coins for autocomplete (via Netlify proxy)
+    fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
+      .then(r => r.json())
+      .then(json => {
+        coins = json.data.map(c => ({
+          symbol: c.symbol,
+          name:   c.name
+        }));
+      });
 
     // 2) Autocomplete
     searchEl.addEventListener('input', () => {
@@ -184,33 +183,33 @@ fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=
       chart.update();
     });
 
-    // 5) Fetch historical data from CMC
+    // 5) Fetch historical data from CMC via proxy
     async function fetchData(days) {
-  const now   = Math.floor(Date.now()/1000);
-  const start = now - days*24*3600;
-  const interval = days > 90 ? 'daily' : 'hourly';
+      const now   = Math.floor(Date.now()/1000);
+      const start = now - days*24*3600;
+      const interval = days > 90 ? 'daily' : 'hourly';
 
-  // ← replace here:
-  const res = await fetch(
-    `/.netlify/functions/proxy-cmc`
-    + `?path=/cryptocurrency/quotes/historical`
-    + `&symbol=${current}`
-    + `&time_start=${start}`
-    + `&time_end=${now}`
-    + `&interval=${interval}`
-  );
+      // Proxy call (no CORS issues)
+      const res = await fetch(
+        '/.netlify/functions/proxy-cmc'
+        + `?path=/cryptocurrency/quotes/historical`
+        + `&symbol=${current}`
+        + `&time_start=${start}`
+        + `&time_end=${now}`
+        + `&interval=${interval}`
+      );
 
-  const js = await res.json();
-  const prices  = js.data.quotes.map(pt => ({
-    x: Date.parse(pt.timestamp),
-    y: pt.quote.USD.price
-  }));
-  const volumes = js.data.quotes.map(pt => ({
-    x: Date.parse(pt.timestamp),
-    y: pt.quote.USD.volume_24h
-  }));
-  return { prices, volumes };
-}
+      const js = await res.json();
+      const prices  = js.data.quotes.map(pt => ({
+        x: Date.parse(pt.timestamp),
+        y: pt.quote.USD.price
+      }));
+      const volumes = js.data.quotes.map(pt => ({
+        x: Date.parse(pt.timestamp),
+        y: pt.quote.USD.volume_24h
+      }));
+      return { prices, volumes };
+    }
 
     // 6) Initialize or update Chart.js
     async function loadChart(days) {
@@ -219,8 +218,9 @@ fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=
       // Decide color: up (orange) or down (red)
       const first = prices[0]?.y, last = prices.at(-1)?.y;
       const up = last >= first;
-      const lineColor = up ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
-                           : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+      const lineColor = up
+        ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
+        : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
 
       if (chart) {
         chart.data.datasets[0].data = prices;
