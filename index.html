@@ -4,74 +4,41 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>CoinPulse Price Chart</title>
-
-  <!-- Chart.js & Luxon -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1/dist/chartjs-adapter-luxon.min.js"></script>
-
   <style>
-    :root {
-      --orange: #FFA500;
-      --orange-light: rgba(255,165,0,0.2);
-      --red: #E63946;
-      --white: #FFFFFF;
-      --gray: #F5F5F5;
-      --text: #333333;
-    }
-    * { box-sizing:border-box; margin:0; padding:0; }
-    body {
-      font-family: Arial, sans-serif;
-      background: var(--white);
-      color: var(--text);
-      display: flex; flex-direction: column; height:100vh;
-    }
-    #controls {
-      background: var(--gray);
-      padding: 10px 20px;
-      display: flex; flex-wrap: wrap; gap:10px; align-items:center;
-      position: relative;
-    }
-    #coinSearch {
-      flex:1 1 200px; padding:8px 12px;
-      border:1px solid #CCC; border-radius:4px;
-      font-size:1rem;
-    }
-    #autocomplete-list {
-      position:absolute; top:42px; left:20px; right:20px;
-      background:var(--white); border:1px solid #CCC;
-      max-height:200px; overflow-y:auto; z-index:10;
-    }
-    .autocomplete-item { padding:6px 12px; cursor:pointer; }
-    .autocomplete-item:hover { background:#EEE; }
-    #controls button {
-      padding:8px 14px; border:none; background:var(--white);
-      cursor:pointer; border-radius:4px;
-      box-shadow:0 1px 3px rgba(0,0,0,0.1);
-      transition:background .2s;
-    }
-    #controls button.active { background:var(--orange); color:#FFF; }
-    #controls button:hover { background:var(--orange-light); }
-    #chartContainer {
-      flex:1; background:var(--white); padding:20px;
-    }
-    canvas {
-      background:var(--white) !important;
-      border:1px solid #DDD; border-radius:8px;
-      width:100% !important; height:100% !important;
-    }
-    @media(max-width:600px){
-      #controls{justify-content:center;}
-      #controls button{flex:1 1 100px;}
-    }
+    :root{--orange:#FFA500;--orange-light:rgba(255,165,0,0.2);
+      --red:#E63946;--white:#FFF;--gray:#F5F5F5;--text:#333;}
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:Arial,sans-serif;display:flex;flex-direction:column;
+      height:100vh;background:var(--white);color:var(--text);}
+    #controls{background:var(--gray);padding:10px 20px;
+      display:flex;flex-wrap:wrap;gap:10px;align-items:center;position:relative;}
+    #coinSearch{flex:1 1 200px;padding:8px;border:1px solid #CCC;
+      border-radius:4px;font-size:1rem;}
+    #autocomplete-list{position:absolute;top:42px;left:20px;right:20px;
+      background:var(--white);border:1px solid #CCC;max-height:200px;
+      overflow-y:auto;z-index:10;}
+    .autocomplete-item{padding:6px 12px;cursor:pointer;}
+    .autocomplete-item:hover{background:#EEE;}
+    #controls button{padding:8px 14px;border:none;background:var(--white);
+      cursor:pointer;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);
+      transition:background .2s;}
+    #controls button.active{background:var(--orange);color:#FFF;}
+    #controls button:hover{background:var(--orange-light);}
+    #chartContainer{flex:1;padding:20px;background:var(--white);}
+    canvas{background:var(--white)!important;border:1px solid #DDD;
+      border-radius:8px;width:100%!important;height:100%!important;}
+    @media(max-width:600px){#controls{justify-content:center;}
+      #controls button{flex:1 1 100px;}}
   </style>
 </head>
-
 <body>
+
   <div id="controls">
     <input id="coinSearch" placeholder="Search top 100 coins (e.g. ETH)" autocomplete="off"/>
     <div id="autocomplete-list"></div>
-
     <button class="range-btn" data-days="1">1D</button>
     <button class="range-btn" data-days="7">7D</button>
     <button class="range-btn active" data-days="365">1Y</button>
@@ -81,175 +48,130 @@
     <button id="volToggle">Show Volume</button>
   </div>
 
-  <div id="chartContainer">
-    <canvas id="priceChart"></canvas>
-  </div>
+  <div id="chartContainer"><canvas id="priceChart"></canvas></div>
 
   <script>
-    const ctx      = document.getElementById('priceChart').getContext('2d');
-    const searchEl = document.getElementById('coinSearch');
-    const listEl   = document.getElementById('autocomplete-list');
-    const volBtn   = document.getElementById('volToggle');
+  const ctx = document.getElementById('priceChart').getContext('2d'),
+        searchEl = document.getElementById('coinSearch'),
+        listEl = document.getElementById('autocomplete-list'),
+        volBtn = document.getElementById('volToggle');
 
-    let coins        = [];
-    let current      = 'BTC';     // default symbol
-    let chart, activeDays = 365;
+  let coins = [], current = 'BTC', chart, activeDays = 365;
+  const LOCAL_CACHE = {}; // per‐coin/day cache
 
-    // simple in-memory cache for coin/time data
-    const LOCAL_CACHE = {};
+  // 1) Load top-100 CMC coins
+  fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
+    .then(r=>r.json())
+    .then(js=> coins = js.data.map(c=>({symbol:c.symbol,name:c.name})));
 
-    // 1) Load top-100 coins via proxy-cmc
-    fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100`)
-      .then(r => r.json())
-      .then(js => {
-        coins = js.data.map(c => ({ symbol: c.symbol, name: c.name }));
-      });
-
-    // 2) Autocomplete (match from start)
-    searchEl.addEventListener('input', () => {
-      const v = searchEl.value.trim().toLowerCase();
-      listEl.innerHTML = '';
-      if (!v) return;
-      coins.filter(c =>
-        c.symbol.toLowerCase().startsWith(v) ||
-        c.name.toLowerCase().startsWith(v)
-      ).slice(0,8).forEach(c => {
-        const div = document.createElement('div');
-        div.className = 'autocomplete-item';
-        div.textContent = `${c.name} (${c.symbol})`;
-        div.onclick = () => {
-          current = c.symbol;
-          searchEl.value = div.textContent;
-          listEl.innerHTML = '';
-          loadChart(activeDays);
-        };
-        listEl.appendChild(div);
-      });
-    });
-
-    // 3) Range buttons
-    document.querySelectorAll('.range-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        activeDays = btn.dataset.days;
-        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+  // 2) Autocomplete
+  searchEl.addEventListener('input',()=>{
+    const q = searchEl.value.trim().toLowerCase();
+    listEl.innerHTML = '';
+    if(!q) return;
+    coins.filter(c=>
+      c.symbol.toLowerCase().startsWith(q) ||
+      c.name.toLowerCase().startsWith(q)
+    ).slice(0,8).forEach(c=>{
+      const d=document.createElement('div');
+      d.className='autocomplete-item';
+      d.textContent=`${c.name} (${c.symbol})`;
+      d.onclick=()=>{
+        current=c.symbol;
+        searchEl.value=d.textContent;
+        listEl.innerHTML='';
         loadChart(activeDays);
-      });
+      };
+      listEl.appendChild(d);
     });
+  });
 
-    // 4) Volume toggle
-    volBtn.addEventListener('click', () => {
-      const vis = chart.isDatasetVisible(1);
-      chart.setDatasetVisibility(1, !vis);
-      chart.options.scales.y1.display = !vis;
-      volBtn.textContent = vis ? 'Show Volume' : 'Hide Volume';
-      volBtn.classList.toggle('active');
-      chart.update();
-    });
+  // 3) Range buttons
+  document.querySelectorAll('.range-btn').forEach(btn=>
+    btn.addEventListener('click',()=>{
+      activeDays=btn.dataset.days;
+      document.querySelectorAll('.range-btn')
+        .forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      loadChart(activeDays);
+    })
+  );
 
-// 5) Fetch historical data via proxy-gecko (not proxy-cmc)
-async function fetchData(symbol, days) {
-  const key = `${symbol}_${days}`;
-  if (LOCAL_CACHE[key]) return LOCAL_CACHE[key];
+  // 4) Volume toggle
+  volBtn.addEventListener('click',()=>{
+    const vis=chart.isDatasetVisible(1);
+    chart.setDatasetVisibility(1,!vis);
+    chart.options.scales.y1.display=!vis;
+    volBtn.textContent= vis?'Show Volume':'Hide Volume';
+    volBtn.classList.toggle('active');
+    chart.update();
+  });
 
-  const url = '/.netlify/functions/proxy-gecko?url='
-    + encodeURIComponent(
-        `https://api.coingecko.com/api/v3/coins/${symbol.toLowerCase()}/market_chart`
-        + `?vs_currency=usd&days=${days}`
+  // 5) Fetch historical via proxy-gecko
+  async function fetchData(sym, days) {
+    const key=`${sym}_${days}`;
+    if(LOCAL_CACHE[key]) return LOCAL_CACHE[key];
+    const url='/.netlify/functions/proxy-gecko?url='+
+      encodeURIComponent(
+        `https://api.coingecko.com/api/v3/coins/${sym.toLowerCase()}/market_chart`
+        +`?vs_currency=usd&days=${days}`
       );
-  const res = await fetch(url);
-  const js  = await res.json();
+    const res=await fetch(url);
+    const js=await res.json();
+    const prices=js.prices.map(p=>({x:p[0],y:p[1]}));
+    const volumes=js.total_volumes.map(v=>({x:v[0],y:v[1]}));
+    LOCAL_CACHE[key]={prices,volumes};
+    return LOCAL_CACHE[key];
+  }
 
-  const prices  = js.prices.map(p => ({ x: p[0], y: p[1] }));
-  const volumes = js.total_volumes.map(v => ({ x: v[0], y: v[1] }));
+  // 6) Fetch real-time price via proxy-cmc
+  async function fetchLatest(sym) {
+    const res=await fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/quotes/latest&symbol=${sym}`);
+    const js=await res.json();
+    return js.data[sym].quote.USD.price;
+  }
 
-  LOCAL_CACHE[key] = { prices, volumes };
-  return LOCAL_CACHE[key];
-}
+  // 7) Load/update chart
+  async function loadChart(days) {
+    const {prices,volumes}=await fetchData(current,days);
+    prices[prices.length-1].y = await fetchLatest(current);
+    const up=prices.at(-1).y>=prices[0].y;
+    const color=up?'var(--orange)':'var(--red)';
 
-
-    // 6) Fetch real-time price via proxy-cmc
-    async function fetchLatest(symbol) {
-      const res = await fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/quotes/latest&symbol=${symbol}`);
-      const js  = await res.json();
-      return js.data[symbol].quote.USD.price;
-    }
-
-    // 7) Initialize/update Chart
-    async function loadChart(days) {
-      const { prices, volumes } = await fetchData(current, days);
-
-      // update final point with live price
-      prices[prices.length-1].y = await fetchLatest(current);
-
-      const up = prices.at(-1).y >= prices[0].y;
-      const color = up ? 'var(--orange)' : 'var(--red)';
-
-      if (chart) {
-        chart.data.datasets[0].data = prices;
-        chart.data.datasets[0].borderColor = color;
-        chart.data.datasets[1].data = volumes;
-        chart.update();
-      } else {
-        chart = new Chart(ctx, {
-          data: {
-            datasets: [
-              {
-                type: 'line',
-                label: 'Price (USD)',
-                data: prices,
-                borderColor: color,
-                backgroundColor: 'var(--orange-light)',
-                fill: false,
-                tension: 0.2,
-                pointRadius: 0,
-                yAxisID: 'y'
-              },
-              {
-                type: 'bar',
-                label: 'Volume (24h)',
-                data: volumes,
-                backgroundColor: 'var(--orange-light)',
-                hidden: true,
-                yAxisID: 'y1'
-              }
-            ]
+    if(chart) {
+      chart.data.datasets[0].data=prices;
+      chart.data.datasets[0].borderColor=color;
+      chart.data.datasets[1].data=volumes;
+      chart.update();
+    } else {
+      chart=new Chart(ctx,{
+        data:{datasets:[
+          {type:'line',label:'Price (USD)',data:prices,
+           borderColor:color,backgroundColor:'var(--orange-light)',
+           fill:false,tension:0.2,pointRadius:0,yAxisID:'y'},
+          {type:'bar',label:'Volume',data:volumes,
+           backgroundColor:'var(--orange-light)',hidden:true,yAxisID:'y1'}
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          scales:{
+            x:{type:'time',time:{unit:days<=1?'hour':'day'},
+               ticks:{color:'#333'},grid:{color:'#EEE'}},
+            y:{position:'left',
+               title:{display:true,text:'Price (USD)',color:'#333'},
+               ticks:{color:'#333'},grid:{color:'#EEE'}},
+            y1:{position:'right',display:false,
+                title:{display:true,text:'Volume',color:'#333'},
+                ticks:{color:'#333'},grid:{drawOnChartArea:false}}
           },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-              x: {
-                type: 'time',
-                time: { unit: days <= 1 ? 'hour' : 'day' },
-                ticks: { color: '#333333' },
-                grid: { color: '#EEE' }
-              },
-              y: {
-                position: 'left',
-                title: { display: true, text: 'Price (USD)', color: '#333333' },
-                ticks: { color: '#333333' },
-                grid: { color: '#EEE' }
-              },
-              y1: {
-                position: 'right',
-                display: false,
-                title: { display: true, text: 'Volume', color: '#333333' },
-                ticks: { color: '#333333' },
-                grid: { drawOnChartArea: false }
-              }
-            },
-            plugins: {
-              tooltip: { mode: 'index', intersect: false },
-              legend: { display: false }
-            }
-          }
-        });
-      }
+          plugins:{tooltip:{mode:'index',intersect:false},legend:{display:false}}
+        }
+      });
     }
+  }
 
-    // 8) Preload default BTC 1Y chart
-    loadChart(activeDays);
+  // 8) Preload default
+  loadChart(activeDays);
+
   </script>
 </body>
 </html>

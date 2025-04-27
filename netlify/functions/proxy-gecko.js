@@ -1,23 +1,28 @@
 // netlify/functions/proxy-gecko.js
 exports.handler = async function(event) {
-    const params = event.queryStringParameters || {};
-    const url    = params.url;
+    const url = event.queryStringParameters?.url;
     if (!url) {
-      return { statusCode: 400, headers:{'Access-Control-Allow-Origin':'*'},
-               body: JSON.stringify({ error:'Missing "url" parameter' }) };
+      return {
+        statusCode: 400,
+        headers: {'Access-Control-Allow-Origin': '*'},
+        body: JSON.stringify({ error: 'Missing "url" parameter' })
+      };
     }
     try {
       const resp = await fetch(url);
-      const data = await resp.text();
+      const text = await resp.text();
       return {
-        statusCode: 200,
-        headers: { 'Access-Control-Allow-Origin':'*','Content-Type':'application/json' },
-        body: data
+        statusCode: resp.status,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'application/json'
+        },
+        body: text
       };
     } catch (err) {
       return {
         statusCode: 500,
-        headers: {'Access-Control-Allow-Origin':'*'},
+        headers: {'Access-Control-Allow-Origin': '*'},
         body: JSON.stringify({ error: err.message })
       };
     }
