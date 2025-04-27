@@ -147,24 +147,26 @@
       chart.update();
     });
 
-    // 5) Fetch historical data via proxy-cmc
-    async function fetchData(symbol, days) {
-      const key = `${symbol}_${days}`;
-      if (LOCAL_CACHE[key]) return LOCAL_CACHE[key];
+// 5) Fetch historical data via proxy-gecko (not proxy-cmc)
+async function fetchData(symbol, days) {
+  const key = `${symbol}_${days}`;
+  if (LOCAL_CACHE[key]) return LOCAL_CACHE[key];
 
-      const now   = Math.floor(Date.now()/1000);
-      const start = now - days*86400;
-      const path  = `/cryptocurrency/quotes/historical`;
-      const params = `symbol=${symbol}&time_start=${start}&time_end=${now}&interval=${days>90?'daily':'hourly'}`;
+  const url = '/.netlify/functions/proxy-gecko?url='
+    + encodeURIComponent(
+        `https://api.coingecko.com/api/v3/coins/${symbol.toLowerCase()}/market_chart`
+        + `?vs_currency=usd&days=${days}`
+      );
+  const res = await fetch(url);
+  const js  = await res.json();
 
-      const res  = await fetch(`/.netlify/functions/proxy-cmc?path=${path}&${params}`);
-      const js   = await res.json();
-      const prices  = js.data.quotes.map(q => ({ x: Date.parse(q.timestamp), y: q.quote.USD.price }));
-      const volumes = js.data.quotes.map(q => ({ x: Date.parse(q.timestamp), y: q.quote.USD.volume_24h }));
+  const prices  = js.prices.map(p => ({ x: p[0], y: p[1] }));
+  const volumes = js.total_volumes.map(v => ({ x: v[0], y: v[1] }));
 
-      LOCAL_CACHE[key] = { prices, volumes };
-      return LOCAL_CACHE[key];
-    }
+  LOCAL_CACHE[key] = { prices, volumes };
+  return LOCAL_CACHE[key];
+}
+
 
     // 6) Fetch real-time price via proxy-cmc
     async function fetchLatest(symbol) {
