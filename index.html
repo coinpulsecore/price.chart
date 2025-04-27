@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>CoinPulse Price Chart</title>
 
   <!-- Chart.js & Luxon -->
@@ -19,7 +19,7 @@
       --gray: #F5F5F5;
       --text: #333333;
     }
-    * { box-sizing: border-box; margin:0; padding:0; }
+    * { box-sizing:border-box; margin:0; padding:0; }
     body {
       font-family: Arial, sans-serif;
       background: var(--white);
@@ -60,9 +60,9 @@
       border:1px solid #DDD; border-radius:8px;
       width:100% !important; height:100% !important;
     }
-    @media (max-width:600px) {
-      #controls { justify-content:center; }
-      #controls button { flex:1 1 100px; }
+    @media(max-width:600px){
+      #controls{justify-content:center;}
+      #controls button{flex:1 1 100px;}
     }
   </style>
 </head>
@@ -91,27 +91,21 @@
     const listEl   = document.getElementById('autocomplete-list');
     const volBtn   = document.getElementById('volToggle');
 
-    let coins    = [];
-    let geckoMap = {};
-    let current  = 'bitcoin';  // default Bitcoin
+    let coins        = [];
+    let current      = 'BTC';     // default symbol
     let chart, activeDays = 365;
 
-    // 1) Load top coins (CMC)
-    fetch('/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100')
-      .then(r => r.json())
-      .then(js => coins = js.data.map(c=>({ symbol:c.symbol, name:c.name })));
+    // simple in-memory cache for coin/time data
+    const LOCAL_CACHE = {};
 
-    // 2) Load CoinGecko list
-    fetch('/.netlify/functions/proxy-gecko?url='
-      + encodeURIComponent('https://api.coingecko.com/api/v3/coins/list'))
+    // 1) Load top-100 coins via proxy-cmc
+    fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/listings/latest&limit=100`)
       .then(r => r.json())
-      .then(list => {
-        list.forEach(c => {
-          geckoMap[c.symbol.toUpperCase()] = c.id;
-        });
+      .then(js => {
+        coins = js.data.map(c => ({ symbol: c.symbol, name: c.name }));
       });
 
-    // 3) Autocomplete
+    // 2) Autocomplete (match from start)
     searchEl.addEventListener('input', () => {
       const v = searchEl.value.trim().toLowerCase();
       listEl.innerHTML = '';
@@ -120,33 +114,31 @@
         c.symbol.toLowerCase().startsWith(v) ||
         c.name.toLowerCase().startsWith(v)
       ).slice(0,8).forEach(c => {
-        const d = document.createElement('div');
-        d.className = 'autocomplete-item';
-        d.textContent = `${c.name} (${c.symbol})`;
-        d.onclick = () => {
-          const id = geckoMap[c.symbol];
-          if (!id) return alert('No data for '+c.symbol);
-          current = id;
-          searchEl.value = `${c.name} (${c.symbol})`;
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.textContent = `${c.name} (${c.symbol})`;
+        div.onclick = () => {
+          current = c.symbol;
+          searchEl.value = div.textContent;
           listEl.innerHTML = '';
           loadChart(activeDays);
         };
-        listEl.appendChild(d);
+        listEl.appendChild(div);
       });
     });
 
-    // 4) Range buttons
-    document.querySelectorAll('.range-btn').forEach(btn=>{
-      btn.addEventListener('click', ()=>{
+    // 3) Range buttons
+    document.querySelectorAll('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
         activeDays = btn.dataset.days;
-        document.querySelectorAll('.range-btn').forEach(b=>b.classList.remove('active'));
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
         loadChart(activeDays);
       });
     });
 
-    // 5) Volume toggle
-    volBtn.addEventListener('click', ()=>{
+    // 4) Volume toggle
+    volBtn.addEventListener('click', () => {
       const vis = chart.isDatasetVisible(1);
       chart.setDatasetVisibility(1, !vis);
       chart.options.scales.y1.display = !vis;
@@ -155,28 +147,41 @@
       chart.update();
     });
 
-    // 6) Fetch chart data
-    async function fetchData(days) {
-      const url = '/.netlify/functions/proxy-gecko?url='
-        + encodeURIComponent(
-          `https://api.coingecko.com/api/v3/coins/${current}/market_chart`
-          + `?vs_currency=usd&days=${days}`
-        );
-      const res = await fetch(url);
-      const js  = await res.json();
-      return {
-        prices: js.prices.map(p => ({x: p[0], y: p[1]})),
-        volumes: js.total_volumes.map(v => ({x: v[0], y: v[1]}))
-      };
+    // 5) Fetch historical data via proxy-cmc
+    async function fetchData(symbol, days) {
+      const key = `${symbol}_${days}`;
+      if (LOCAL_CACHE[key]) return LOCAL_CACHE[key];
+
+      const now   = Math.floor(Date.now()/1000);
+      const start = now - days*86400;
+      const path  = `/cryptocurrency/quotes/historical`;
+      const params = `symbol=${symbol}&time_start=${start}&time_end=${now}&interval=${days>90?'daily':'hourly'}`;
+
+      const res  = await fetch(`/.netlify/functions/proxy-cmc?path=${path}&${params}`);
+      const js   = await res.json();
+      const prices  = js.data.quotes.map(q => ({ x: Date.parse(q.timestamp), y: q.quote.USD.price }));
+      const volumes = js.data.quotes.map(q => ({ x: Date.parse(q.timestamp), y: q.quote.USD.volume_24h }));
+
+      LOCAL_CACHE[key] = { prices, volumes };
+      return LOCAL_CACHE[key];
     }
 
-    // 7) Initialize Chart.js
+    // 6) Fetch real-time price via proxy-cmc
+    async function fetchLatest(symbol) {
+      const res = await fetch(`/.netlify/functions/proxy-cmc?path=/cryptocurrency/quotes/latest&symbol=${symbol}`);
+      const js  = await res.json();
+      return js.data[symbol].quote.USD.price;
+    }
+
+    // 7) Initialize/update Chart
     async function loadChart(days) {
-      const {prices, volumes} = await fetchData(days);
+      const { prices, volumes } = await fetchData(current, days);
+
+      // update final point with live price
+      prices[prices.length-1].y = await fetchLatest(current);
+
       const up = prices.at(-1).y >= prices[0].y;
-      const color = up
-        ? getComputedStyle(document.documentElement).getPropertyValue('--orange').trim()
-        : getComputedStyle(document.documentElement).getPropertyValue('--red').trim();
+      const color = up ? 'var(--orange)' : 'var(--red)';
 
       if (chart) {
         chart.data.datasets[0].data = prices;
@@ -187,33 +192,62 @@
         chart = new Chart(ctx, {
           data: {
             datasets: [
-              { type:'line', label:'Price (USD)', data:prices,
-                borderColor:color, backgroundColor:'var(--orange-light)',
-                fill:false, tension:0.2, pointRadius:0, yAxisID:'y' },
-              { type:'bar', label:'Volume', data:volumes,
-                backgroundColor:'var(--orange-light)', hidden:true, yAxisID:'y1' }
+              {
+                type: 'line',
+                label: 'Price (USD)',
+                data: prices,
+                borderColor: color,
+                backgroundColor: 'var(--orange-light)',
+                fill: false,
+                tension: 0.2,
+                pointRadius: 0,
+                yAxisID: 'y'
+              },
+              {
+                type: 'bar',
+                label: 'Volume (24h)',
+                data: volumes,
+                backgroundColor: 'var(--orange-light)',
+                hidden: true,
+                yAxisID: 'y1'
+              }
             ]
           },
           options: {
-            responsive:true, maintainAspectRatio:false,
-            scales:{
-              x:{ type:'time', time:{unit:days<=1?'hour':'day'},
-                  ticks:{color:'#333'},grid:{color:'#EEE'} },
-              y:{ position:'left',
-                  title:{display:true,text:'Price (USD)',color:'#333'},
-                  ticks:{color:'#333'},grid:{color:'#EEE'} },
-              y1:{ position:'right', display:false,
-                   title:{display:true,text:'Volume',color:'#333'},
-                   ticks:{color:'#333'},grid:{drawOnChartArea:false} }
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              x: {
+                type: 'time',
+                time: { unit: days <= 1 ? 'hour' : 'day' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y: {
+                position: 'left',
+                title: { display: true, text: 'Price (USD)', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { color: '#EEE' }
+              },
+              y1: {
+                position: 'right',
+                display: false,
+                title: { display: true, text: 'Volume', color: '#333333' },
+                ticks: { color: '#333333' },
+                grid: { drawOnChartArea: false }
+              }
             },
-            plugins:{ tooltip:{mode:'index',intersect:false}, legend:{display:false} }
+            plugins: {
+              tooltip: { mode: 'index', intersect: false },
+              legend: { display: false }
+            }
           }
         });
       }
     }
 
-    // 8) Preload Bitcoin 1-year chart
-    loadChart(365);
+    // 8) Preload default BTC 1Y chart
+    loadChart(activeDays);
   </script>
 </body>
 </html>
